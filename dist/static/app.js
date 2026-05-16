@@ -436,6 +436,55 @@ function navigate(page) {
 // ============================================================
 // DASHBOARD
 // ============================================================
+function renderMiCajaHoy(caj) {
+  if (isAdmin()) return ''
+  if (!caj) {
+    return '<div class="card" style="border:2px dashed #e2e8f0;text-align:center;padding:32px">' +
+      '<i class="fas fa-cash-register" style="font-size:2.5rem;color:#94a3b8;margin-bottom:12px"></i>' +
+      '<h3 style="color:#64748b">No tienes caja abierta hoy</h3>' +
+      '<p style="color:#94a3b8;margin:8px 0 16px">Abre tu caja para comenzar a registrar movimientos</p>' +
+      '<button class="btn btn-primary" onclick="navigate(\'cajas\');setTimeout(openCaja,200)">' +
+      '<i class="fas fa-plus"></i> Abrir Caja</button></div>'
+  }
+  var saldoActual = (caj.saldo_inicial||0) + (caj.ingresos||0) - (caj.egresos||0)
+  var diferencia  = saldoActual - (caj.saldo_inicial||0)
+  var alertaSaldo = diferencia > 5
+  var color = alertaSaldo ? '#10b981' : 'var(--primary)'
+  var alertaBadge = alertaSaldo
+    ? '<span style="background:#d1fae5;color:#065f46;padding:4px 12px;border-radius:20px;font-size:0.82rem;font-weight:700">' +
+      '<i class="fas fa-arrow-up"></i> Saldo +' + fmt$(diferencia) + ' vs inicio</span>'
+    : ''
+  var alertaBox = alertaSaldo
+    ? '<div style="margin-top:12px;padding:10px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;' +
+      'font-size:0.85rem;color:#166534;display:flex;align-items:center;gap:8px">' +
+      '<i class="fas fa-info-circle"></i>' +
+      '<div><strong>Saldo supera +$5 al inicial.</strong> Verifica que todos los movimientos estén registrados.</div></div>'
+    : ''
+  return '<div class="card" style="border-left:4px solid ' + color + '">' +
+    '<div class="card-header">' +
+      '<div class="card-title"><i class="fas fa-cash-register"></i> Mi Caja de Hoy</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        alertaBadge + fmtEstadoCaja(caj.estado) +
+        '<button class="btn btn-sm btn-primary" onclick="navigate(\'cajas\')">' +
+        '<i class="fas fa-eye"></i> Ver Detalle</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="grid-3">' +
+      '<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px">' +
+        '<div style="font-size:0.8rem;color:#64748b">Saldo Inicial</div>' +
+        '<div class="money" style="font-size:1.4rem;font-weight:800;color:var(--primary)">' + fmt$(caj.saldo_inicial) + '</div>' +
+      '</div>' +
+      '<div style="text-align:center;padding:16px;background:#d1fae5;border-radius:12px">' +
+        '<div style="font-size:0.8rem;color:#065f46">Ingresos</div>' +
+        '<div class="money" style="font-size:1.4rem;font-weight:800;color:#10b981">+' + fmt$(caj.ingresos||0) + '</div>' +
+      '</div>' +
+      '<div style="text-align:center;padding:16px;background:#fee2e2;border-radius:12px">' +
+        '<div style="font-size:0.8rem;color:#991b1b">Egresos</div>' +
+        '<div class="money" style="font-size:1.4rem;font-weight:800;color:#ef4444">-' + fmt$(caj.egresos||0) + '</div>' +
+      '</div>' +
+    '</div>' + alertaBox + '</div>'
+}
+
 async function renderDashboard() {
   const content = document.getElementById('page-content')
   content.innerHTML = '<div class="loading-box" style="text-align:center;padding:60px"><div class="spinner-dark" style="width:40px;height:40px;border-width:4px;display:inline-block"></div><p style="margin-top:16px;color:#64748b">Cargando dashboard...</p></div>'
@@ -583,61 +632,7 @@ async function renderDashboard() {
           </div>
         </div>
         
-        ${!isAdmin() && data.mi_caja_hoy ? (() => {
-          const caj = data.mi_caja_hoy
-          const saldoActual = (caj.saldo_inicial||0) + (caj.ingresos||0) - (caj.egresos||0)
-          const diferencia  = saldoActual - (caj.saldo_inicial||0)
-          const alertaSaldo = diferencia > 5
-          return `
-        <div class="card" style="border-left:4px solid ${alertaSaldo ? '#10b981' : 'var(--primary)'}">
-          <div class="card-header">
-            <div class="card-title"><i class="fas fa-cash-register"></i> Mi Caja de Hoy</div>
-            <div style="display:flex;gap:8px;align-items:center">
-              ${alertaSaldo ? `<span style="background:#d1fae5;color:#065f46;padding:4px 12px;border-radius:20px;font-size:0.82rem;font-weight:700">
-                <i class="fas fa-arrow-up"></i> Saldo +${fmt$(diferencia)} vs inicio
-              </span>` : ''}
-              ${fmtEstadoCaja(caj.estado)}
-              <button class="btn btn-sm btn-primary" onclick="navigate('cajas')">
-                <i class="fas fa-eye"></i> Ver Detalle
-              </button>
-            </div>
-          </div>
-          <div class="grid-3">
-            <div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px">
-              <div style="font-size:0.8rem;color:#64748b">Saldo Inicial</div>
-              <div class="money" style="font-size:1.4rem;font-weight:800;color:var(--primary)">${fmt$(caj.saldo_inicial)}</div>
-            </div>
-            <div style="text-align:center;padding:16px;background:#d1fae5;border-radius:12px">
-              <div style="font-size:0.8rem;color:#065f46">Ingresos</div>
-              <div class="money" style="font-size:1.4rem;font-weight:800;color:#10b981">+${fmt$(caj.ingresos || 0)}</div>
-            </div>
-            <div style="text-align:center;padding:16px;background:#fee2e2;border-radius:12px">
-              <div style="font-size:0.8rem;color:#991b1b">Egresos</div>
-              <div class="money" style="font-size:1.4rem;font-weight:800;color:#ef4444">-${fmt$(caj.egresos || 0)}</div>
-            </div>
-          </div>
-          ${alertaSaldo ? `
-          <div style="margin-top:12px;padding:10px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;
-            font-size:0.85rem;color:#166534;display:flex;align-items:center;gap:8px">
-            <i class="fas fa-info-circle"></i>
-            <div>
-              <strong>Caja con saldo positivo:</strong>
-              El saldo actual (${fmt$(saldoActual)}) supera al saldo inicial (${fmt$(caj.saldo_inicial)}) en más de $5.
-              Recuerda registrar todos los movimientos correctamente.
-            </div>
-          </div>` : ''}
-        </div>`
-        })()}
-        ` : !isAdmin() ? `
-        <div class="card" style="border:2px dashed #e2e8f0;text-align:center;padding:32px">
-          <i class="fas fa-cash-register" style="font-size:2.5rem;color:#94a3b8;margin-bottom:12px"></i>
-          <h3 style="color:#64748b">No tienes caja abierta hoy</h3>
-          <p style="color:#94a3b8;margin:8px 0 16px">Abre tu caja para comenzar a registrar movimientos</p>
-          <button class="btn btn-primary" onclick="navigate('cajas');setTimeout(openCaja,200)">
-            <i class="fas fa-plus"></i> Abrir Caja
-          </button>
-        </div>
-        ` : ''}
+        ${renderMiCajaHoy(data.mi_caja_hoy)}
         
         ${isAdmin() && data.top_trabajadores?.length > 0 ? `
         <div class="card">
