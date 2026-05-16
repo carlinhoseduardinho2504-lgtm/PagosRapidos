@@ -49,6 +49,8 @@ app.route('/api/historial', historialRoutes)
 // Health check
 app.get('/api/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
 
+
+
 // SPA - serve frontend for all other routes
 app.get('*', (c) => {
   return c.html(getHtml())
