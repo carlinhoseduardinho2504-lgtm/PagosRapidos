@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { getSession } from '../utils/auth'
 
-type Bindings = { DB: D1Database; R2: R2Bucket; GEMINI_API_KEY: string }
+type Bindings = { DB: D1Database; R2: R2Bucket; GEMINI_API_KEY?: string }
 
 export const excelRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -54,9 +54,19 @@ excelRoutes.post('/upload', auth, async (c) => {
 
     const uploadId = dbResult.meta.last_row_id
 
+    // Obtener API key desde DB o env var
+    const keyRow = await c.env.DB.prepare(
+      "SELECT valor FROM configuracion WHERE clave = 'gemini_api_key'"
+    ).first<{ valor: string }>()
+    const modelRow = await c.env.DB.prepare(
+      "SELECT valor FROM configuracion WHERE clave = 'gemini_model'"
+    ).first<{ valor: string }>()
+    const geminiKey = (keyRow?.valor?.trim()) || c.env.GEMINI_API_KEY || ''
+    const geminiModel = (modelRow?.valor?.trim()) || 'gemini-2.5-flash'
+
     // Analizar con Gemini AI
     const analysisResult = await analyzeExcelWithGemini(
-      fileBuffer, file.name, sistema, c.env.GEMINI_API_KEY
+      fileBuffer, file.name, sistema, geminiKey, geminiModel
     )
 
     // Actualizar con resultado
@@ -119,7 +129,8 @@ async function analyzeExcelWithGemini(
   buffer: ArrayBuffer,
   filename: string,
   sistema: string,
-  apiKey: string
+  apiKey: string,
+  model: string = 'gemini-2.5-flash'
 ): Promise<any> {
   try {
     if (!apiKey) {
@@ -134,9 +145,11 @@ async function analyzeExcelWithGemini(
     const uint8Array = new Uint8Array(buffer)
     const base64 = btoa(String.fromCharCode(...uint8Array))
 
-    const prompt = `Eres un experto en análisis financiero y contabilidad para una agencia de pagos rápidos en Ecuador.
+    const prompt = `Eres un experto en análisis financiero y contabilidad para una agencia de pagos rápidos en Ecuador (Agencia Alban Borja).
     
 Analiza el archivo Excel adjunto llamado "${filename}" del sistema "${sistema}".
+
+IMPORTANTE: Esta agencia maneja múltiples sistemas de cobro/pago (Gold Pagos, DEX, Western Union, MoneyGram, Banco del Pacífico, etc.). Los trabajadores a veces escriben notas como "le di tanto a fulano", "transferí a mengano", "préstamo a X persona" - interpreta TODAS estas notas correctamente como transferencias internas o préstamos.
 
 Por favor extrae y analiza:
 1. MOVIMIENTOS: Lista todos los movimientos (ingresos y egresos) con fecha, descripción, monto
@@ -144,8 +157,9 @@ Por favor extrae y analiza:
 3. SISTEMAS/CUENTAS: Saldos por sistema (Gold Pagos, DEX, Western Union, Caja, etc.)
 4. BILLETES/MONEDAS: Si hay conteo de efectivo (denominaciones y cantidades)
 5. VERIFICACIÓN DEL CUADRE: ¿Los números cuadran? ¿Hay diferencias?
-6. OBSERVACIONES: Movimientos inusuales, transferencias entre trabajadores, etc.
-7. RECOMENDACIONES: Puntos de mejora o alertas
+6. JUSTIFICACIONES: Interpreta todas las notas, transferencias entre trabajadores, préstamos internos mencionados en el Excel
+7. OBSERVACIONES: Movimientos inusuales, patrones, etc.
+8. RECOMENDACIONES: Puntos de mejora o alertas
 
 Responde en formato JSON con esta estructura:
 {
@@ -158,15 +172,16 @@ Responde en formato JSON con esta estructura:
   },
   "saldos_sistemas": [{"sistema": "nombre", "saldo": número}],
   "conteo_efectivo": [{"denominacion": número, "cantidad": número, "subtotal": número}],
-  "movimientos": [{"descripcion": "texto", "tipo": "ingreso|egreso", "monto": número}],
+  "movimientos": [{"descripcion": "texto", "tipo": "ingreso|egreso", "monto": número, "fecha": "texto"}],
+  "justificaciones": [{"texto_original": "lo que escribió el trabajador", "interpretacion": "lo que significa", "monto": número}],
   "observaciones": ["texto"],
   "alertas": ["texto"],
   "recomendaciones": ["texto"],
-  "verificacion_cuadre": "texto explicativo"
+  "verificacion_cuadre": "texto explicativo detallado"
 }`
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

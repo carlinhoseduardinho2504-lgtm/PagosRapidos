@@ -9,6 +9,9 @@ import { usersRoutes } from './routes/users'
 import { excelRoutes } from './routes/excel'
 import { dashboardRoutes } from './routes/dashboard'
 import { reportsRoutes } from './routes/reports'
+import { configRoutes } from './routes/config'
+import { notasRoutes } from './routes/notas'
+import { historialRoutes } from './routes/historial'
 
 type Bindings = {
   DB: D1Database
@@ -39,6 +42,9 @@ app.route('/api/users', usersRoutes)
 app.route('/api/excel', excelRoutes)
 app.route('/api/dashboard', dashboardRoutes)
 app.route('/api/reports', reportsRoutes)
+app.route('/api/config', configRoutes)
+app.route('/api/notas', notasRoutes)
+app.route('/api/historial', historialRoutes)
 
 // Health check
 app.get('/api/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))

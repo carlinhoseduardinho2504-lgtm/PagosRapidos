@@ -303,6 +303,12 @@ function renderApp() {
         <div class="nav-item ${currentPage==='reportes'?'active':''}" onclick="navigate('reportes')">
           <i class="fas fa-chart-bar icon"></i> Reportes
         </div>
+        <div class="nav-item ${currentPage==='historial'?'active':''}" onclick="navigate('historial')">
+          <i class="fas fa-calendar-alt icon"></i> Historial Diario
+        </div>
+        <div class="nav-item ${currentPage==='notas'?'active':''}" onclick="navigate('notas')">
+          <i class="fas fa-receipt icon"></i> Notas y Comprobantes
+        </div>
         ` : ''}
         
         ${canManageUsers() ? `
@@ -319,6 +325,9 @@ function renderApp() {
         ${isSuperAdmin() ? `
         <div class="nav-item ${currentPage==='auditoria'?'active':''}" onclick="navigate('auditoria')">
           <i class="fas fa-shield-alt icon"></i> Auditoría
+        </div>
+        <div class="nav-item ${currentPage==='configuracion'?'active':''}" onclick="navigate('configuracion')">
+          <i class="fas fa-cog icon"></i> Configuración
         </div>
         ` : ''}
       </div>
@@ -388,7 +397,10 @@ function navigate(page) {
     reportes: 'Reportes',
     usuarios: 'Gestión de Usuarios',
     excel: 'Análisis con IA',
-    auditoria: 'Auditoría del Sistema'
+    auditoria: 'Auditoría del Sistema',
+    configuracion: 'Configuración del Sistema',
+    notas: 'Blog de Notas y Comprobantes',
+    historial: 'Historial Diario'
   }
   
   const titleEl = document.getElementById('page-title')
@@ -403,7 +415,10 @@ function navigate(page) {
     reportes: renderReportes,
     usuarios: renderUsuarios,
     excel: renderExcel,
-    auditoria: renderAuditoria
+    auditoria: renderAuditoria,
+    configuracion: renderConfiguracion,
+    notas: renderNotas,
+    historial: renderHistorial
   }
   
   if (pages[page]) pages[page]()
@@ -1177,6 +1192,21 @@ async function aprobarCaja(id, aprobado) {
   try {
     await api(`/cajas/${id}/aprobar`, { method: 'POST', body: JSON.stringify({ aprobado }) })
     toast(`Caja ${aprobado ? 'aprobada' : 'rechazada'} exitosamente`, 'success')
+    
+    // Si se aprueba, guardar snapshot en historial diario
+    if (aprobado) {
+      try {
+        await api('/historial/snapshot', {
+          method: 'POST',
+          body: JSON.stringify({ caja_id: id })
+        })
+        toast('📅 Snapshot guardado en historial diario', 'info')
+      } catch (e) {
+        // No crítico si falla el snapshot
+        console.warn('No se pudo guardar snapshot:', e.message)
+      }
+    }
+    
     renderCajas()
   } catch (err) {
     toast(err.message, 'error')
@@ -1356,11 +1386,11 @@ async function renderPendientes() {
               <option value="por_pagar">Por Pagar</option>
               <option value="por_cobrar">Por Cobrar</option>
             </select>
-            <select class="form-select" style="width:150px" id="pend-filter-estado" onchange="filterPendientes()">
-              <option value="pendiente">Pendientes</option>
-              <option value="">Todos</option>
-              <option value="pagado_parcial">Parciales</option>
-              <option value="pagado_total">Pagados</option>
+            <select class="form-select" style="width:160px" id="pend-filter-estado" onchange="filterPendientes()">
+              <option value="">Todos (activos)</option>
+              <option value="pendiente">Solo Pendientes</option>
+              <option value="pagado_parcial">Parcialmente Abonados</option>
+              <option value="pagado_total">Pagados Total</option>
               <option value="cancelado">Cancelados</option>
             </select>
           </div>
@@ -1374,8 +1404,8 @@ async function renderPendientes() {
     
     window._pendientesData = pendientes
     
-    // Apply initial filter
-    document.getElementById('pend-filter-estado').value = 'pendiente'
+    // Apply initial filter - mostrar pendientes Y parciales por defecto
+    document.getElementById('pend-filter-estado').value = ''
     filterPendientes()
     
   } catch (err) {
@@ -1395,7 +1425,12 @@ function filterPendientes() {
     p.codigo?.toLowerCase().includes(search)
   )
   if (tipo) filtered = filtered.filter(p => p.tipo === tipo)
-  if (estado) filtered = filtered.filter(p => p.estado === estado)
+  if (estado) {
+    filtered = filtered.filter(p => p.estado === estado)
+  } else {
+    // Sin filtro: mostrar todos excepto cancelados (pendiente + parcial + total)
+    filtered = filtered.filter(p => p.estado !== 'cancelado')
+  }
   
   const el = document.getElementById('pendientes-table')
   if (el) el.innerHTML = renderPendientesTable(filtered)
@@ -1629,12 +1664,24 @@ async function submitAbono() {
     closeModal()
     hideLoading()
     
+    // Actualizar dinámicamente en la lista sin recargar toda la página
+    if (window._pendientesData) {
+      const idx = window._pendientesData.findIndex(p => p.id === id)
+      if (idx >= 0) {
+        window._pendientesData[idx].monto_pendiente = res.monto_pendiente_nuevo
+        window._pendientesData[idx].estado = res.estado
+      }
+    }
+    
     if (res.pagado_total) {
       toast('✅ Pendiente pagado completamente', 'success')
     } else {
-      toast(`Abono registrado. Resta: ${fmt$(res.monto_pendiente_nuevo)}`, 'success')
+      toast(`✅ Abono registrado. Monto restante: ${fmt$(res.monto_pendiente_nuevo)}`, 'success')
     }
-    renderPendientes()
+    
+    // Re-aplicar filtros para reflejar cambios sin recargar todo
+    filterPendientes()
+    
   } catch (err) {
     hideLoading()
     toast(err.message, 'error')
@@ -2772,3 +2819,668 @@ if ('serviceWorker' in navigator) {
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth()
 })
+
+// ============================================================
+// CONFIGURACIÓN DEL SISTEMA
+// ============================================================
+async function renderConfiguracion() {
+  const content = document.getElementById('page-content')
+  if (!isSuperAdmin() && !isAdmin()) {
+    content.innerHTML = '<div class="alert alert-error"><i class="fas fa-lock"></i> Sin permisos para ver esta sección.</div>'
+    return
+  }
+
+  content.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <!-- API Key Gemini -->
+      <div class="config-section">
+        <div class="config-section-title">
+          <i class="fas fa-robot" style="color:var(--accent)"></i> API Key de Gemini AI
+        </div>
+        <p style="color:#64748b;margin-bottom:16px;font-size:0.9rem">
+          La API Key se almacena de forma segura en la base de datos y es compartida por todos los usuarios del sistema.
+          Solo se muestran los últimos 6 caracteres por seguridad.
+        </p>
+        <div id="current-key-display" class="key-display" style="margin-bottom:16px">
+          <i class="fas fa-spinner fa-spin"></i> Cargando...
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nueva API Key de Gemini</label>
+          <div style="display:flex;gap:10px">
+            <input type="password" class="form-input" id="new-gemini-key" placeholder="AIzaSy...">
+            <button class="btn btn-ghost btn-sm" onclick="toggleKeyVisibility()">
+              <i class="fas fa-eye" id="key-eye-icon"></i>
+            </button>
+          </div>
+          <div style="font-size:0.8rem;color:#64748b;margin-top:4px">
+            Obtén tu API Key en <a href="https://aistudio.google.com" target="_blank" style="color:var(--primary)">Google AI Studio</a>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveGeminiKey()">
+          <i class="fas fa-save"></i> Guardar API Key
+        </button>
+      </div>
+
+      <!-- Selección de Modelo -->
+      <div class="config-section">
+        <div class="config-section-title">
+          <i class="fas fa-microchip"></i> Modelo de Gemini
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+          <div id="modelo-actual" class="key-display" style="flex:1">Cargando modelo actual...</div>
+          <button class="btn btn-ghost btn-sm" onclick="verificarModelos()">
+            <i class="fas fa-sync"></i> Verificar Modelos
+          </button>
+        </div>
+        <div id="modelos-list">
+          <div style="text-align:center;padding:20px;color:#94a3b8">
+            <i class="fas fa-info-circle"></i> Haz clic en "Verificar Modelos" para ver los disponibles con tu API Key.
+          </div>
+        </div>
+        <button class="btn btn-primary" id="save-modelo-btn" style="margin-top:12px;display:none" onclick="saveModelo()">
+          <i class="fas fa-save"></i> Guardar Modelo Seleccionado
+        </button>
+      </div>
+
+      <!-- Información del sistema -->
+      <div class="config-section">
+        <div class="config-section-title">
+          <i class="fas fa-info-circle"></i> Información del Sistema
+        </div>
+        <div id="sys-info-content">
+          <div style="text-align:center"><div class="spinner-dark" style="width:24px;height:24px;border-width:3px;display:inline-block"></div></div>
+        </div>
+      </div>
+    </div>
+  `
+
+  loadConfigData()
+}
+
+async function loadConfigData() {
+  try {
+    const data = await api('/config')
+    const configs = data?.configs || []
+
+    // Mostrar API Key actual
+    const keyConfig = configs.find(c => c.clave === 'gemini_api_key')
+    const keyDisplay = document.getElementById('current-key-display')
+    if (keyDisplay) {
+      keyDisplay.innerHTML = keyConfig?.valor
+        ? `<i class="fas fa-key" style="color:var(--accent)"></i> ${keyConfig.valor} <span style="color:#10b981;font-size:0.75rem;margin-left:8px">✓ Configurada</span>`
+        : `<i class="fas fa-exclamation-triangle" style="color:#f59e0b"></i> No configurada`
+    }
+
+    // Mostrar modelo actual
+    const modeloConfig = configs.find(c => c.clave === 'gemini_model')
+    const modeloDisplay = document.getElementById('modelo-actual')
+    if (modeloDisplay) {
+      modeloDisplay.innerHTML = `<i class="fas fa-robot"></i> ${modeloConfig?.valor || 'gemini-2.5-flash'}`
+    }
+    window._currentModelo = modeloConfig?.valor || 'gemini-2.5-flash'
+
+    // Información del sistema
+    const versionConfig = configs.find(c => c.clave === 'version_sistema')
+    const sysInfo = document.getElementById('sys-info-content')
+    if (sysInfo) {
+      sysInfo.innerHTML = `
+        <div class="grid-2" style="gap:16px">
+          <div>
+            <div style="font-size:0.75rem;color:#94a3b8;font-weight:600">VERSIÓN</div>
+            <div style="font-weight:700">${versionConfig?.valor || '1.0.0'}</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem;color:#94a3b8;font-weight:600">PLATAFORMA</div>
+            <div style="font-weight:700">Cloudflare Pages + D1</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem;color:#94a3b8;font-weight:600">MODELO IA ACTIVO</div>
+            <div style="font-weight:700">${modeloConfig?.valor || 'gemini-2.5-flash'}</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem;color:#94a3b8;font-weight:600">USUARIO ADMIN</div>
+            <div style="font-weight:700">${currentUser?.nombre} ${currentUser?.apellido}</div>
+          </div>
+        </div>
+      `
+    }
+  } catch (err) {
+    toast('Error cargando configuración: ' + err.message, 'error')
+  }
+}
+
+function toggleKeyVisibility() {
+  const input = document.getElementById('new-gemini-key')
+  const icon = document.getElementById('key-eye-icon')
+  if (input.type === 'password') {
+    input.type = 'text'
+    icon.className = 'fas fa-eye-slash'
+  } else {
+    input.type = 'password'
+    icon.className = 'fas fa-eye'
+  }
+}
+
+async function saveGeminiKey() {
+  const key = document.getElementById('new-gemini-key').value.trim()
+  if (!key) { toast('Ingresa la API Key', 'warning'); return }
+  if (!key.startsWith('AI')) { toast('La API Key de Gemini debe comenzar con "AI"', 'warning'); return }
+
+  try {
+    showLoading('Guardando API Key...')
+    await api('/config', {
+      method: 'PUT',
+      body: JSON.stringify({ gemini_api_key: key })
+    })
+    hideLoading()
+    document.getElementById('new-gemini-key').value = ''
+    toast('API Key guardada exitosamente', 'success')
+    loadConfigData()
+  } catch (err) {
+    hideLoading()
+    toast('Error: ' + err.message, 'error')
+  }
+}
+
+window._selectedModelo = null
+
+async function verificarModelos() {
+  const list = document.getElementById('modelos-list')
+  list.innerHTML = `<div style="text-align:center;padding:20px"><div class="spinner-dark" style="width:30px;height:30px;border-width:3px;display:inline-block"></div><p style="margin-top:12px;color:#64748b">Verificando modelos disponibles con tu API Key...</p></div>`
+
+  try {
+    const data = await api('/config/modelos-gemini')
+    if (data.error) {
+      list.innerHTML = `<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> ${data.error}</div>`
+      return
+    }
+
+    const modelos = data.modelos || []
+    if (!modelos.length) {
+      list.innerHTML = '<div class="alert alert-warning">No se encontraron modelos compatibles.</div>'
+      return
+    }
+
+    window._selectedModelo = window._currentModelo || 'gemini-2.5-flash'
+
+    list.innerHTML = `
+      <p style="font-size:0.85rem;color:#64748b;margin-bottom:14px">Se encontraron <strong>${modelos.length}</strong> modelos compatibles. Haz clic para seleccionar:</p>
+      ${modelos.map(m => `
+        <div class="model-card ${m.id === window._selectedModelo ? 'selected' : ''}" 
+             onclick="selectModelo('${m.id}', this)">
+          <div class="model-name">
+            ${m.id}
+            ${m.recomendado ? '<span class="recomendado-badge">⭐ Recomendado</span>' : ''}
+          </div>
+          <div class="model-desc">${m.nombre}${m.descripcion ? ' — ' + m.descripcion : ''}</div>
+        </div>
+      `).join('')}
+    `
+    document.getElementById('save-modelo-btn').style.display = 'block'
+    toast(`${modelos.length} modelos encontrados`, 'success')
+  } catch (err) {
+    list.innerHTML = `<div class="alert alert-error">${err.message}</div>`
+  }
+}
+
+function selectModelo(modelId, el) {
+  document.querySelectorAll('.model-card').forEach(c => c.classList.remove('selected'))
+  el.classList.add('selected')
+  window._selectedModelo = modelId
+}
+
+async function saveModelo() {
+  if (!window._selectedModelo) { toast('Selecciona un modelo', 'warning'); return }
+
+  try {
+    showLoading('Guardando modelo...')
+    await api('/config', {
+      method: 'PUT',
+      body: JSON.stringify({ gemini_model: window._selectedModelo })
+    })
+    hideLoading()
+    toast(`Modelo cambiado a: ${window._selectedModelo}`, 'success')
+    loadConfigData()
+  } catch (err) {
+    hideLoading()
+    toast(err.message, 'error')
+  }
+}
+
+// ============================================================
+// NOTAS Y COMPROBANTES
+// ============================================================
+async function renderNotas() {
+  const content = document.getElementById('page-content')
+  if (!isAdmin()) {
+    content.innerHTML = '<div class="alert alert-error"><i class="fas fa-lock"></i> Solo administradores y superadmin pueden ver el blog de notas.</div>'
+    return
+  }
+
+  content.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <!-- Stats -->
+      <div id="notas-stats-area"></div>
+
+      <!-- Filtros -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fas fa-receipt"></i> Blog de Notas y Comprobantes</div>
+        </div>
+        <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+          <select class="form-select" style="width:160px" id="notas-tipo" onchange="loadNotas()">
+            <option value="">Todos los tipos</option>
+            <option value="impresion">Impresiones</option>
+            <option value="comprobante">Comprobantes</option>
+            <option value="nota">Notas</option>
+            <option value="recibo">Recibos</option>
+            <option value="reporte">Reportes</option>
+          </select>
+          <input type="date" class="form-input" style="width:160px" id="notas-fecha" 
+            value="${new Date().toISOString().split('T')[0]}" onchange="loadNotas()">
+          <button class="btn btn-ghost btn-sm" onclick="clearNotasFecha()">
+            <i class="fas fa-times"></i> Hoy
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="loadNotas()">
+            <i class="fas fa-sync"></i>
+          </button>
+        </div>
+        <div id="notas-list">
+          <div style="text-align:center;padding:30px"><div class="spinner-dark" style="width:30px;height:30px;border-width:3px;display:inline-block"></div></div>
+        </div>
+      </div>
+    </div>
+  `
+
+  loadNotasStats()
+  loadNotas()
+}
+
+async function loadNotasStats() {
+  try {
+    const data = await api('/notas/stats/resumen')
+    const el = document.getElementById('notas-stats-area')
+    if (!el) return
+    el.innerHTML = `
+      <div class="grid-3">
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#e0e7ff;color:#4f46e5"><i class="fas fa-receipt"></i></div>
+          <div class="stat-content">
+            <div class="stat-value">${data.total_hoy}</div>
+            <div class="stat-label">Registros Hoy</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#fef3c7;color:#d97706"><i class="fas fa-calendar-alt"></i></div>
+          <div class="stat-content">
+            <div class="stat-value">${data.total_mes}</div>
+            <div class="stat-label">Este Mes</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#d1fae5;color:#059669"><i class="fas fa-print"></i></div>
+          <div class="stat-content">
+            <div class="stat-value">${(data.por_tipo || []).find(t => t.tipo === 'impresion')?.total || 0}</div>
+            <div class="stat-label">Impresiones</div>
+          </div>
+        </div>
+      </div>
+    `
+  } catch {}
+}
+
+async function loadNotas() {
+  const tipo = document.getElementById('notas-tipo')?.value || ''
+  const fecha = document.getElementById('notas-fecha')?.value || ''
+
+  let path = '/notas?'
+  if (tipo) path += `tipo=${tipo}&`
+  if (fecha) path += `fecha=${fecha}&`
+
+  const list = document.getElementById('notas-list')
+  if (!list) return
+  list.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner-dark" style="width:24px;height:24px;border-width:3px;display:inline-block"></div></div>'
+
+  try {
+    const data = await api(path)
+    const notas = data?.notas || []
+
+    if (!notas.length) {
+      list.innerHTML = '<div class="empty-state"><i class="fas fa-receipt"></i><h3>Sin notas para este filtro</h3><p>Cambia los filtros o date para ver otras fechas</p></div>'
+      return
+    }
+
+    list.innerHTML = notas.map(n => `
+      <div class="nota-card tipo-${n.tipo}">
+        <div class="nota-header">
+          <div class="nota-titulo">${escHtml(n.titulo)}</div>
+          ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteNota(${n.id})"><i class="fas fa-trash"></i></button>` : ''}
+        </div>
+        <div class="nota-meta">
+          <span class="nota-tipo-badge ${n.tipo}">${notaTipoIcon(n.tipo)} ${n.tipo}</span>
+          <span style="font-size:0.8rem;color:#94a3b8"><i class="fas fa-user"></i> ${n.nombre} ${n.apellido}</span>
+          ${n.caja_id ? `<span style="font-size:0.8rem;color:#94a3b8"><i class="fas fa-cash-register"></i> Caja #${n.caja_id}</span>` : ''}
+          <span style="font-size:0.8rem;color:#94a3b8">${fmtDatetime(n.created_at)}</span>
+        </div>
+        ${n.contenido ? `<div class="nota-contenido">${escHtml(n.contenido).substring(0, 400)}${n.contenido.length > 400 ? '...' : ''}</div>` : ''}
+      </div>
+    `).join('')
+  } catch (err) {
+    list.innerHTML = `<div class="alert alert-error">${err.message}</div>`
+  }
+}
+
+function clearNotasFecha() {
+  const fechaEl = document.getElementById('notas-fecha')
+  if (fechaEl) fechaEl.value = new Date().toISOString().split('T')[0]
+  loadNotas()
+}
+
+function notaTipoIcon(tipo) {
+  const icons = { impresion: '🖨️', comprobante: '📄', nota: '📝', recibo: '🧾', reporte: '📊' }
+  return icons[tipo] || '📌'
+}
+
+async function deleteNota(id) {
+  if (!confirm('¿Eliminar esta nota?')) return
+  try {
+    await api(`/notas/${id}`, { method: 'DELETE' })
+    toast('Nota eliminada', 'success')
+    loadNotas()
+    loadNotasStats()
+  } catch (err) {
+    toast(err.message, 'error')
+  }
+}
+
+function escHtml(str) {
+  if (!str) return ''
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
+// ============================================================
+// HISTORIAL DIARIO
+// ============================================================
+async function renderHistorial() {
+  const content = document.getElementById('page-content')
+
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+  const hoy = new Date()
+  const mesActual = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`
+
+  content.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <!-- Tabs -->
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-primary btn-sm" id="hist-tab-diario" onclick="showHistTab('diario')">
+          <i class="fas fa-calendar-day"></i> Historial Diario
+        </button>
+        <button class="btn btn-ghost btn-sm" id="hist-tab-mensual" onclick="showHistTab('mensual')">
+          <i class="fas fa-chart-line"></i> Resumen Mensual
+        </button>
+      </div>
+
+      <!-- Filtros Diario -->
+      <div id="hist-filtros-diario" class="card">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label style="font-weight:600;color:#1e293b">Mes:</label>
+          <input type="month" class="form-input" style="width:180px" id="hist-mes" value="${mesActual}" onchange="loadHistorialDiario()">
+          ${isAdmin() ? `
+          <label style="font-weight:600;color:#1e293b">Usuario:</label>
+          <select class="form-select" style="width:200px" id="hist-user" onchange="loadHistorialDiario()">
+            <option value="">Todos</option>
+          </select>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="loadHistorialDiario()"><i class="fas fa-sync"></i></button>
+        </div>
+      </div>
+
+      <!-- Filtros Mensual -->
+      <div id="hist-filtros-mensual" class="card" style="display:none">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label style="font-weight:600;color:#1e293b">Año:</label>
+          <input type="number" class="form-input" style="width:120px" id="hist-anio" value="${hoy.getFullYear()}" min="2020" max="2030" onchange="loadHistorialMensual()">
+          ${isAdmin() ? `
+          <label style="font-weight:600;color:#1e293b">Usuario:</label>
+          <select class="form-select" style="width:200px" id="hist-user-mes" onchange="loadHistorialMensual()">
+            <option value="">Todos</option>
+          </select>` : ''}
+        </div>
+      </div>
+
+      <!-- Contenido -->
+      <div id="hist-content">
+        <div style="text-align:center;padding:40px"><div class="spinner-dark" style="width:36px;height:36px;border-width:4px;display:inline-block"></div></div>
+      </div>
+    </div>
+  `
+
+  // Cargar usuarios si es admin
+  if (isAdmin()) {
+    try {
+      const usersData = await api('/users')
+      const users = usersData?.users || []
+      const selects = ['hist-user', 'hist-user-mes']
+      selects.forEach(selId => {
+        const sel = document.getElementById(selId)
+        if (sel) {
+          sel.innerHTML = '<option value="">Todos</option>' +
+            users.map(u => `<option value="${u.id}">${u.nombre} ${u.apellido}</option>`).join('')
+        }
+      })
+    } catch {}
+  }
+
+  loadHistorialDiario()
+}
+
+window._histTab = 'diario'
+
+function showHistTab(tab) {
+  window._histTab = tab
+  const diarioBtns = document.getElementById('hist-tab-diario')
+  const mensualBtns = document.getElementById('hist-tab-mensual')
+  const filtrosDiario = document.getElementById('hist-filtros-diario')
+  const filtrosMensual = document.getElementById('hist-filtros-mensual')
+
+  if (tab === 'diario') {
+    diarioBtns?.classList.add('btn-primary'); diarioBtns?.classList.remove('btn-ghost')
+    mensualBtns?.classList.add('btn-ghost'); mensualBtns?.classList.remove('btn-primary')
+    if (filtrosDiario) filtrosDiario.style.display = ''
+    if (filtrosMensual) filtrosMensual.style.display = 'none'
+    loadHistorialDiario()
+  } else {
+    mensualBtns?.classList.add('btn-primary'); mensualBtns?.classList.remove('btn-ghost')
+    diarioBtns?.classList.add('btn-ghost'); diarioBtns?.classList.remove('btn-primary')
+    if (filtrosMensual) filtrosMensual.style.display = ''
+    if (filtrosDiario) filtrosDiario.style.display = 'none'
+    loadHistorialMensual()
+  }
+}
+
+async function loadHistorialDiario() {
+  const content = document.getElementById('hist-content')
+  if (!content) return
+  content.innerHTML = '<div style="text-align:center;padding:30px"><div class="spinner-dark" style="width:30px;height:30px;border-width:3px;display:inline-block"></div></div>'
+
+  const mes = document.getElementById('hist-mes')?.value || ''
+  const userId = document.getElementById('hist-user')?.value || ''
+
+  let path = `/historial?limit=60`
+  if (mes) path += `&mes=${mes}`
+  if (userId) path += `&user_id=${userId}`
+
+  try {
+    const data = await api(path)
+    const historial = data?.historial || []
+
+    if (!historial.length) {
+      content.innerHTML = '<div class="empty-state"><i class="fas fa-calendar-times"></i><h3>Sin historial para este período</h3><p>Los snapshots se crean cuando se aprueba un cuadre de caja.</p></div>'
+      return
+    }
+
+    content.innerHTML = historial.map(h => {
+      const sData = h.snapshot_data
+      return `
+        <div class="historial-card">
+          <div class="historial-fecha">
+            <i class="fas fa-calendar-day"></i>
+            ${fmtDate(h.fecha)} — <strong>${h.nombre} ${h.apellido}</strong>
+          </div>
+          <div class="historial-stats">
+            <div class="historial-stat">
+              <div class="historial-stat-val">${fmt$(h.saldo_inicial)}</div>
+              <div class="historial-stat-label">Saldo Inicial</div>
+            </div>
+            <div class="historial-stat">
+              <div class="historial-stat-val positive">${fmt$(h.total_ingresos)}</div>
+              <div class="historial-stat-label">Ingresos</div>
+            </div>
+            <div class="historial-stat">
+              <div class="historial-stat-val negative">${fmt$(h.total_egresos)}</div>
+              <div class="historial-stat-label">Egresos</div>
+            </div>
+            <div class="historial-stat">
+              <div class="historial-stat-val ${h.ganancia_neta >= 0 ? 'positive' : 'negative'}">${fmt$(h.ganancia_neta)}</div>
+              <div class="historial-stat-label">Ganancia Neta</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;margin-top:10px;font-size:0.8rem;color:#94a3b8;flex-wrap:wrap">
+            <span><i class="fas fa-exchange-alt"></i> ${h.num_movimientos || 0} movimientos</span>
+            <span><i class="fas fa-file-invoice-dollar"></i> ${h.num_pendientes_cobrados || 0} cobros</span>
+            ${Math.abs(h.diferencia_caja) > 0.01 ? `<span style="color:${h.diferencia_caja > 0 ? '#10b981' : '#ef4444'}"><i class="fas fa-balance-scale"></i> Diferencia: ${fmt$(h.diferencia_caja)}</span>` : '<span style="color:#10b981"><i class="fas fa-check-circle"></i> Cuadre perfecto</span>'}
+          </div>
+        </div>
+      `
+    }).join('')
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${err.message}</div>`
+  }
+}
+
+async function loadHistorialMensual() {
+  const content = document.getElementById('hist-content')
+  if (!content) return
+  content.innerHTML = '<div style="text-align:center;padding:30px"><div class="spinner-dark" style="width:30px;height:30px;border-width:3px;display:inline-block"></div></div>'
+
+  const anio = document.getElementById('hist-anio')?.value || new Date().getFullYear()
+  const userId = document.getElementById('hist-user-mes')?.value || ''
+
+  let path = `/historial/mensual?anio=${anio}`
+  if (userId) path += `&user_id=${userId}`
+
+  try {
+    const data = await api(path)
+    const meses = data?.resumen_mensual || []
+
+    if (!meses.length) {
+      content.innerHTML = '<div class="empty-state"><i class="fas fa-chart-line"></i><h3>Sin datos para este año</h3></div>'
+      return
+    }
+
+    const mesNombres = { '01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre' }
+
+    content.innerHTML = meses.map(m => {
+      const mesNum = (m.mes || '').split('-')[1] || ''
+      const mesNombre = mesNombres[mesNum] || m.mes
+      return `
+        <div class="mes-card">
+          <div class="mes-title">
+            <i class="fas fa-calendar-alt" style="color:var(--accent)"></i>
+            ${mesNombre} ${anio} — ${m.nombre} ${m.apellido}
+            <span style="font-size:0.8rem;font-weight:normal;color:#64748b;margin-left:8px">(${m.dias_trabajados} días)</span>
+          </div>
+          <div class="mes-grid">
+            <div class="mes-stat">
+              <div class="mes-stat-val" style="color:#10b981">${fmt$(m.total_ingresos)}</div>
+              <div class="mes-stat-label">Total Ingresos</div>
+            </div>
+            <div class="mes-stat">
+              <div class="mes-stat-val" style="color:#ef4444">${fmt$(m.total_egresos)}</div>
+              <div class="mes-stat-label">Total Egresos</div>
+            </div>
+            <div class="mes-stat">
+              <div class="mes-stat-val" style="color:${m.ganancia_neta >= 0 ? '#10b981' : '#ef4444'}">${fmt$(m.ganancia_neta)}</div>
+              <div class="mes-stat-label">Ganancia Neta</div>
+            </div>
+            <div class="mes-stat">
+              <div class="mes-stat-val">${m.total_movimientos || 0}</div>
+              <div class="mes-stat-label">Movimientos</div>
+            </div>
+            <div class="mes-stat">
+              <div class="mes-stat-val">${m.pendientes_cobrados || 0}</div>
+              <div class="mes-stat-label">Cobros Realizados</div>
+            </div>
+            <div class="mes-stat">
+              <div class="mes-stat-val">${m.dias_trabajados}</div>
+              <div class="mes-stat-label">Días Trabajados</div>
+            </div>
+          </div>
+        </div>
+      `
+    }).join('')
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${err.message}</div>`
+  }
+}
+
+// ============================================================
+// CAPTURA DE IMPRESIÓN (Ctrl+P / Archivo > Imprimir)
+// ============================================================
+(function setupPrintCapture() {
+  // Indicador visual en el DOM
+  const indicator = document.createElement('div')
+  indicator.id = 'print-capture-indicator'
+  indicator.className = 'print-capture-indicator'
+  indicator.innerHTML = '<i class="fas fa-print"></i> Registrando impresión...'
+  document.body.appendChild(indicator)
+
+  async function capturarImpresion() {
+    if (!token || !currentUser) return
+
+    const indicator = document.getElementById('print-capture-indicator')
+    if (indicator) indicator.classList.add('show')
+
+    try {
+      const paginaActual = currentPage || 'pagina-desconocida'
+      const titulo = `Impresión — ${paginaActual} — ${new Date().toLocaleString('es-EC')}`
+
+      // Capturar el contenido visible (texto plano del área principal)
+      const contentEl = document.getElementById('page-content')
+      const contenidoTexto = contentEl ? contentEl.innerText.substring(0, 2000) : ''
+
+      await fetch('/api/notas/captura-impresion', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          titulo,
+          contenido_html: contenidoTexto,
+          pagina_actual: paginaActual
+        })
+      })
+    } catch (e) {
+      // Silencioso — no interrumpir el flujo de impresión
+    }
+
+    setTimeout(() => {
+      if (indicator) indicator.classList.remove('show')
+    }, 3000)
+  }
+
+  // Escuchar evento beforeprint (Ctrl+P, Archivo > Imprimir)
+  window.addEventListener('beforeprint', capturarImpresion)
+
+  // Fallback para navegadores que no disparan beforeprint
+  window.matchMedia('print').addEventListener('change', (mq) => {
+    if (mq.matches) capturarImpresion()
+  })
+})()
+
+// ============================================================
+// MEJORAS: MÚLTIPLES EXCEL POR CAJA
+// ============================================================
+// Sobrescribe la función renderExcel con versión mejorada
+window._excelFiles = [] // Lista de archivos seleccionados
+

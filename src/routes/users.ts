@@ -46,11 +46,11 @@ usersRoutes.get('/:id', auth, async (c) => {
   return c.json({ user })
 })
 
-// POST /api/users - Crear usuario (solo superadmin/admin)
+// POST /api/users - Crear usuario (SOLO superadmin)
 usersRoutes.post('/', auth, async (c) => {
   const session = c.get('session')
-  if (!['superadmin', 'admin'].includes(session.role)) {
-    return c.json({ error: 'Solo administradores pueden crear usuarios' }, 403)
+  if (session.role !== 'superadmin') {
+    return c.json({ error: 'Solo el superadmin puede crear usuarios' }, 403)
   }
 
   const { cedula, nombre, apellido, email, password, role } = await c.req.json()
@@ -59,10 +59,8 @@ usersRoutes.post('/', auth, async (c) => {
     return c.json({ error: 'Cédula, nombre, apellido y contraseña son requeridos' }, 400)
   }
 
-  // Validar rol: superadmin no puede crear otro superadmin
-  const allowedRoles = session.role === 'superadmin'
-    ? ['admin', 'supervisor', 'trabajador']
-    : ['supervisor', 'trabajador']
+  // Superadmin puede crear admin, supervisor o trabajador (nunca otro superadmin)
+  const allowedRoles = ['admin', 'supervisor', 'trabajador']
 
   if (role && !allowedRoles.includes(role)) {
     return c.json({ error: `No puedes crear usuarios con rol: ${role}` }, 403)
