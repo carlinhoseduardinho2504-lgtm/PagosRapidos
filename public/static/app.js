@@ -295,6 +295,11 @@ function renderApp() {
           <i class="fas fa-file-invoice-dollar icon"></i> CXP / Pendientes
         </div>
         
+        <!-- Notas: disponible para TODOS los usuarios -->
+        <div class="nav-item ${currentPage==='notas'?'active':''}" onclick="navigate('notas')">
+          <i class="fas fa-receipt icon"></i> Notas y Comprobantes
+        </div>
+
         ${isAdmin() ? `
         <div class="nav-section-title">Administración</div>
         <div class="nav-item ${currentPage==='cajas-admin'?'active':''}" onclick="navigate('cajas-admin')">
@@ -305,9 +310,6 @@ function renderApp() {
         </div>
         <div class="nav-item ${currentPage==='historial'?'active':''}" onclick="navigate('historial')">
           <i class="fas fa-calendar-alt icon"></i> Historial Diario
-        </div>
-        <div class="nav-item ${currentPage==='notas'?'active':''}" onclick="navigate('notas')">
-          <i class="fas fa-receipt icon"></i> Notas y Comprobantes
         </div>
         ` : ''}
         
@@ -581,12 +583,20 @@ async function renderDashboard() {
           </div>
         </div>
         
-        ${!isAdmin() && data.mi_caja_hoy ? `
-        <div class="card" style="border-left:4px solid var(--primary)">
+        ${!isAdmin() && data.mi_caja_hoy ? (() => {
+          const caj = data.mi_caja_hoy
+          const saldoActual = (caj.saldo_inicial||0) + (caj.ingresos||0) - (caj.egresos||0)
+          const diferencia  = saldoActual - (caj.saldo_inicial||0)
+          const alertaSaldo = diferencia > 5
+          return `
+        <div class="card" style="border-left:4px solid ${alertaSaldo ? '#10b981' : 'var(--primary)'}">
           <div class="card-header">
             <div class="card-title"><i class="fas fa-cash-register"></i> Mi Caja de Hoy</div>
-            <div style="display:flex;gap:8px">
-              ${fmtEstadoCaja(data.mi_caja_hoy.estado)}
+            <div style="display:flex;gap:8px;align-items:center">
+              ${alertaSaldo ? `<span style="background:#d1fae5;color:#065f46;padding:4px 12px;border-radius:20px;font-size:0.82rem;font-weight:700">
+                <i class="fas fa-arrow-up"></i> Saldo +${fmt$(diferencia)} vs inicio
+              </span>` : ''}
+              ${fmtEstadoCaja(caj.estado)}
               <button class="btn btn-sm btn-primary" onclick="navigate('cajas')">
                 <i class="fas fa-eye"></i> Ver Detalle
               </button>
@@ -595,18 +605,29 @@ async function renderDashboard() {
           <div class="grid-3">
             <div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px">
               <div style="font-size:0.8rem;color:#64748b">Saldo Inicial</div>
-              <div class="money" style="font-size:1.4rem;font-weight:800;color:var(--primary)">${fmt$(data.mi_caja_hoy.saldo_inicial)}</div>
+              <div class="money" style="font-size:1.4rem;font-weight:800;color:var(--primary)">${fmt$(caj.saldo_inicial)}</div>
             </div>
             <div style="text-align:center;padding:16px;background:#d1fae5;border-radius:12px">
               <div style="font-size:0.8rem;color:#065f46">Ingresos</div>
-              <div class="money" style="font-size:1.4rem;font-weight:800;color:#10b981">+${fmt$(data.mi_caja_hoy.ingresos || 0)}</div>
+              <div class="money" style="font-size:1.4rem;font-weight:800;color:#10b981">+${fmt$(caj.ingresos || 0)}</div>
             </div>
             <div style="text-align:center;padding:16px;background:#fee2e2;border-radius:12px">
               <div style="font-size:0.8rem;color:#991b1b">Egresos</div>
-              <div class="money" style="font-size:1.4rem;font-weight:800;color:#ef4444">-${fmt$(data.mi_caja_hoy.egresos || 0)}</div>
+              <div class="money" style="font-size:1.4rem;font-weight:800;color:#ef4444">-${fmt$(caj.egresos || 0)}</div>
             </div>
           </div>
-        </div>
+          ${alertaSaldo ? `
+          <div style="margin-top:12px;padding:10px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;
+            font-size:0.85rem;color:#166534;display:flex;align-items:center;gap:8px">
+            <i class="fas fa-info-circle"></i>
+            <div>
+              <strong>Caja con saldo positivo:</strong>
+              El saldo actual (${fmt$(saldoActual)}) supera al saldo inicial (${fmt$(caj.saldo_inicial)}) en más de $5.
+              Recuerda registrar todos los movimientos correctamente.
+            </div>
+          </div>` : ''}
+        </div>`
+        })()}
         ` : !isAdmin() ? `
         <div class="card" style="border:2px dashed #e2e8f0;text-align:center;padding:32px">
           <i class="fas fa-cash-register" style="font-size:2.5rem;color:#94a3b8;margin-bottom:12px"></i>
@@ -631,17 +652,22 @@ async function renderDashboard() {
                 <th>Ingresos</th>
                 <th>Egresos</th>
                 <th>Ganancia</th>
+                <th></th>
               </tr></thead>
               <tbody>
-                ${data.top_trabajadores.map(t => `
-                <tr>
+                ${data.top_trabajadores.map(t => {
+                  const ganancia = (t.total_ingresos||0) - (t.total_egresos||0)
+                  const alerta = ganancia > 5
+                  return `
+                <tr ${alerta ? 'style="background:#f0fdf4"' : ''}>
                   <td><strong>${t.nombre} ${t.apellido}</strong><br><small style="color:#94a3b8">${t.cedula}</small></td>
                   <td>${t.num_cajas}</td>
                   <td class="money text-ingreso">+${fmt$(t.total_ingresos)}</td>
                   <td class="money text-egreso">-${fmt$(t.total_egresos)}</td>
-                  <td class="money" style="font-weight:800;color:${(t.total_ingresos-t.total_egresos)>=0?'#10b981':'#ef4444'}">${fmt$(t.total_ingresos-t.total_egresos)}</td>
-                </tr>
-                `).join('')}
+                  <td class="money" style="font-weight:800;color:${ganancia>=0?'#10b981':'#ef4444'}">${fmt$(ganancia)}</td>
+                  <td>${alerta ? '<span title="Ganancia supera $5 vs egresos" style="color:#10b981;font-weight:700;font-size:0.8rem"><i class="fas fa-arrow-up"></i></span>' : ''}</td>
+                </tr>`
+                }).join('')}
               </tbody>
             </table>
           </div>
@@ -1883,11 +1909,16 @@ function renderAdminCajasTable(cajas) {
             const gan = (c.total_ingresos||0) - (c.total_egresos||0)
             const esperado = (c.saldo_inicial||0) + (c.total_ingresos||0) - (c.total_egresos||0)
             const dif = c.saldo_final != null ? c.saldo_final - esperado : null
+            const saldoActual = c.saldo_final != null ? c.saldo_final : esperado
+            const alertaSaldo = saldoActual - (c.saldo_inicial||0) > 5
             return `
-            <tr style="${c.estado==='cuadrada'?'background:#fffbeb':c.estado==='rechazada'?'background:#fff5f5':''}">
+            <tr style="${alertaSaldo ? 'background:#f0fdf4' : c.estado==='cuadrada'?'background:#fffbeb':c.estado==='rechazada'?'background:#fff5f5':''}">
               <td>
                 <div style="font-weight:600">${c.nombre} ${c.apellido}</div>
                 <div style="font-size:0.75rem;color:#94a3b8">${c.cedula}</div>
+                ${alertaSaldo ? `<div style="font-size:0.75rem;color:#10b981;font-weight:700">
+                  <i class="fas fa-arrow-up"></i> Saldo +$${(saldoActual-(c.saldo_inicial||0)).toFixed(2)} vs inicio
+                </div>` : ''}
               </td>
               <td>${fmtDate(c.fecha)}</td>
               <td class="money">${fmt$(c.saldo_inicial)}</td>
@@ -3048,59 +3079,355 @@ async function saveModelo() {
 }
 
 // ============================================================
-// NOTAS Y COMPROBANTES
+// NOTAS Y COMPROBANTES - Blog de Notas con Detección de Manipulación
 // ============================================================
+
+// Estado del editor de comprobantes
+window._notaContenidoOriginal = '' // Texto pegado originalmente
+
 async function renderNotas() {
   const content = document.getElementById('page-content')
-  if (!isAdmin()) {
-    content.innerHTML = '<div class="alert alert-error"><i class="fas fa-lock"></i> Solo administradores y superadmin pueden ver el blog de notas.</div>'
-    return
-  }
+
+  // Todos pueden acceder, pero admin ve todos - trabajador ve los suyos
+  const esAdmin = isAdmin()
 
   content.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:20px">
-      <!-- Stats -->
-      <div id="notas-stats-area"></div>
 
-      <!-- Filtros -->
+      ${esAdmin ? '<div id="notas-stats-area"></div>' : ''}
+
+      <!-- Panel: Nuevo Comprobante/Nota -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title"><i class="fas fa-receipt"></i> Blog de Notas y Comprobantes</div>
+          <div class="card-title"><i class="fas fa-paste"></i> Pegar y Registrar Comprobante</div>
+          <div style="font-size:0.8rem;color:#64748b">Pega el comprobante del sistema, edítalo si hace falta, luego imprímelo. Quedará guardado el registro original.</div>
         </div>
-        <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-          <select class="form-select" style="width:160px" id="notas-tipo" onchange="loadNotas()">
-            <option value="">Todos los tipos</option>
-            <option value="impresion">Impresiones</option>
-            <option value="comprobante">Comprobantes</option>
-            <option value="nota">Notas</option>
-            <option value="recibo">Recibos</option>
-            <option value="reporte">Reportes</option>
-          </select>
-          <input type="date" class="form-input" style="width:160px" id="notas-fecha" 
-            value="${new Date().toISOString().split('T')[0]}" onchange="loadNotas()">
-          <button class="btn btn-ghost btn-sm" onclick="clearNotasFecha()">
-            <i class="fas fa-times"></i> Hoy
-          </button>
-          <button class="btn btn-ghost btn-sm" onclick="loadNotas()">
-            <i class="fas fa-sync"></i>
-          </button>
-        </div>
-        <div id="notas-list">
-          <div style="text-align:center;padding:30px"><div class="spinner-dark" style="width:30px;height:30px;border-width:3px;display:inline-block"></div></div>
+
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:200px">
+              <label class="form-label">Título del comprobante *</label>
+              <input type="text" class="form-input" id="nota-titulo"
+                placeholder="Ej: Recibo de pago Juan Pérez - Western Union $85"
+                value="Comprobante ${new Date().toLocaleString('es-EC')}">
+            </div>
+            <div style="min-width:160px">
+              <label class="form-label">Tipo</label>
+              <select class="form-select" id="nota-tipo">
+                <option value="comprobante">📄 Comprobante</option>
+                <option value="recibo">🧾 Recibo</option>
+                <option value="nota">📝 Nota</option>
+                <option value="reporte">📊 Reporte</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Área de pegado -->
+          <div>
+            <label class="form-label">
+              <i class="fas fa-file-alt"></i> Contenido del comprobante *
+              <span style="font-size:0.75rem;color:#94a3b8;font-weight:normal;margin-left:8px">
+                — Pega aquí (Ctrl+V) el comprobante del sistema
+              </span>
+            </label>
+            <div style="position:relative">
+              <textarea class="form-textarea" id="nota-contenido" rows="10"
+                placeholder="📋 Pega aquí el comprobante copiado del sistema (Ctrl+V)...
+
+Ejemplo:
+WESTERN UNION
+Fecha: 15/05/2026
+Remitente: Juan Pérez
+Destinatario: María García
+Monto: $85.00
+Referencia: WU-123456
+Total cobrado: $85.00"
+                oninput="onNotaContenidoInput(this.value)"
+                onpaste="onNotaPaste(event)"
+                style="font-family:monospace;font-size:0.85rem;resize:vertical"></textarea>
+
+              <!-- Indicador de manipulación -->
+              <div id="nota-alerta-manip" style="display:none;position:absolute;top:8px;right:8px;
+                background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:6px 12px;
+                font-size:0.8rem;font-weight:700;color:#92400e;display:flex;align-items:center;gap:6px">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span id="nota-alerta-txt">Valores modificados</span>
+              </div>
+            </div>
+
+            <!-- Comparación de valores -->
+            <div id="nota-diff-area" style="display:none;margin-top:8px;padding:12px;
+              background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;font-size:0.85rem">
+              <div style="font-weight:700;color:#92400e;margin-bottom:6px">
+                <i class="fas fa-exclamation-triangle"></i> ¡Valores editados detectados!
+              </div>
+              <div id="nota-diff-detalle" style="color:#78350f"></div>
+            </div>
+          </div>
+
+          <!-- Acciones -->
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-primary" onclick="guardarNota(false)">
+              <i class="fas fa-save"></i> Guardar Registro
+            </button>
+            <button class="btn btn-success" onclick="guardarNota(true)" id="btn-guardar-imprimir">
+              <i class="fas fa-print"></i> Guardar e Imprimir
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick="limpiarNota()">
+              <i class="fas fa-times"></i> Limpiar
+            </button>
+            <div id="nota-saving" style="display:none;color:#64748b;font-size:0.85rem">
+              <div class="spinner-dark" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle"></div>
+              Guardando...
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- Lista de notas guardadas -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <i class="fas fa-history"></i>
+            ${esAdmin ? 'Registro de Comprobantes (Todos los usuarios)' : 'Mis Comprobantes Guardados'}
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <select class="form-select" style="width:150px" id="notas-tipo-f" onchange="loadNotas()">
+              <option value="">Todos los tipos</option>
+              <option value="comprobante">Comprobantes</option>
+              <option value="recibo">Recibos</option>
+              <option value="nota">Notas</option>
+              <option value="impresion">Impresiones</option>
+            </select>
+            <input type="date" class="form-input" style="width:150px" id="notas-fecha-f"
+              value="${new Date().toISOString().split('T')[0]}" onchange="loadNotas()">
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('notas-fecha-f').value='';loadNotas()">
+              <i class="fas fa-times"></i>
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick="loadNotas()">
+              <i class="fas fa-sync"></i>
+            </button>
+          </div>
+        </div>
+        <div id="notas-list">
+          <div style="text-align:center;padding:24px">
+            <div class="spinner-dark" style="width:28px;height:28px;border-width:3px;display:inline-block"></div>
+          </div>
+        </div>
+      </div>
+
     </div>
   `
 
-  loadNotasStats()
+  if (esAdmin) loadNotasStats()
   loadNotas()
 }
+
+// -------- Detección de manipulación --------
+
+function onNotaPaste(evt) {
+  // Capturar el texto pegado ANTES de que se inserte en el textarea
+  setTimeout(() => {
+    const ta = document.getElementById('nota-contenido')
+    if (!ta) return
+    const val = ta.value
+    window._notaContenidoOriginal = val
+    // Limpiar estado de diff al pegar de nuevo
+    mostrarDiff([], [])
+  }, 10)
+}
+
+function onNotaContenidoInput(valor) {
+  if (!window._notaContenidoOriginal) {
+    window._notaContenidoOriginal = valor
+    return
+  }
+  if (valor === window._notaContenidoOriginal) {
+    mostrarDiff([], [])
+    return
+  }
+  // Extraer montos del original y del actual
+  const extraerMontos = (txt) => {
+    const reg = /\$?\s*(\d{1,6}(?:[.,]\d{1,2})?)/g
+    const montos = []
+    let m
+    while ((m = reg.exec(txt)) !== null) {
+      const v = parseFloat(m[1].replace(',','.'))
+      if (!isNaN(v) && v >= 0.01 && v < 1000000) montos.push(v)
+    }
+    return montos
+  }
+  const orig = extraerMontos(window._notaContenidoOriginal)
+  const edit = extraerMontos(valor)
+  // Detectar montos que aparecen en edit pero no en orig (o viceversa con diferencia significativa)
+  const origSet = new Set(orig.map(v => v.toFixed(2)))
+  const editSet = new Set(edit.map(v => v.toFixed(2)))
+  const nuevos = [...editSet].filter(v => !origSet.has(v))
+  const removidos = [...origSet].filter(v => !editSet.has(v))
+  mostrarDiff(nuevos, removidos)
+}
+
+function mostrarDiff(nuevos, removidos) {
+  const alertaEl = document.getElementById('nota-alerta-manip')
+  const diffArea = document.getElementById('nota-diff-area')
+  const diffDetalle = document.getElementById('nota-diff-detalle')
+
+  const hayManip = nuevos.length > 0 || removidos.length > 0
+  if (alertaEl) alertaEl.style.display = hayManip ? 'flex' : 'none'
+  if (diffArea) diffArea.style.display = hayManip ? 'block' : 'none'
+  if (!hayManip || !diffDetalle) return
+
+  let html = ''
+  if (removidos.length > 0) {
+    html += `<div style="margin-bottom:4px">❌ <strong>Valores eliminados:</strong> ${removidos.map(v=>'$'+v).join(', ')}</div>`
+  }
+  if (nuevos.length > 0) {
+    html += `<div>⚠️ <strong>Valores nuevos/modificados:</strong> ${nuevos.map(v=>'$'+v).join(', ')}</div>`
+  }
+  html += `<div style="margin-top:6px;font-size:0.8rem;color:#92400e">
+    El comprobante original quedará guardado junto al editado. El administrador será notificado.
+  </div>`
+  if (diffDetalle) diffDetalle.innerHTML = html
+}
+
+// -------- Guardar nota --------
+
+async function guardarNota(imprimir = false) {
+  const titulo    = document.getElementById('nota-titulo')?.value?.trim()
+  const contenido = document.getElementById('nota-contenido')?.value?.trim()
+  const tipo      = document.getElementById('nota-tipo')?.value || 'comprobante'
+
+  if (!titulo) { toast('Escribe un título', 'error'); return }
+  if (!contenido) { toast('El contenido está vacío. Pega el comprobante primero.', 'error'); return }
+
+  const saving = document.getElementById('nota-saving')
+  const btnSave = document.getElementById('btn-guardar-imprimir')
+  if (saving) saving.style.display = 'flex'
+  if (btnSave) btnSave.disabled = true
+
+  try {
+    const payload = {
+      tipo,
+      titulo,
+      contenido,
+      contenido_original: window._notaContenidoOriginal || contenido
+    }
+
+    const resp = await api('/notas', { method: 'POST', body: JSON.stringify(payload) })
+
+    // Mostrar alerta si el backend detectó manipulación
+    if (resp.alerta_manipulacion) {
+      toast('⚠️ Comprobante guardado con alerta: se detectaron valores editados. El administrador fue notificado.', 'error', 6000)
+    } else {
+      toast('✅ Comprobante guardado correctamente', 'success')
+    }
+
+    if (imprimir) {
+      // Imprimir el comprobante en ventana limpia
+      imprimirComprobante(titulo, contenido)
+    }
+
+    // Limpiar y recargar lista
+    limpiarNota()
+    await loadNotas()
+    if (isAdmin()) await loadNotasStats()
+
+  } catch (err) {
+    toast(err.message || 'Error al guardar', 'error')
+  } finally {
+    if (saving) saving.style.display = 'none'
+    if (btnSave) btnSave.disabled = false
+  }
+}
+
+function imprimirComprobante(titulo, contenido) {
+  // Crear ventana de impresión limpia (formato de ticket/recibo)
+  const win = window.open('', '_blank', 'width=400,height=600')
+  if (!win) { toast('El navegador bloqueó la ventana. Permite popups.', 'error'); return }
+
+  win.document.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>${escHtml(titulo)}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      padding: 10px;
+      max-width: 300px;
+      margin: 0 auto;
+    }
+    .header {
+      text-align: center;
+      border-bottom: 2px dashed #000;
+      padding-bottom: 8px;
+      margin-bottom: 8px;
+    }
+    .header h2 { font-size: 14px; font-weight: bold; }
+    .header small { font-size: 10px; color: #555; }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .footer {
+      border-top: 2px dashed #000;
+      margin-top: 8px;
+      padding-top: 8px;
+      text-align: center;
+      font-size: 10px;
+      color: #555;
+    }
+    @media print {
+      body { padding: 0; }
+      @page { margin: 5mm; size: 80mm auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2>Pagos Rapidos</h2>
+    <small>Agencia Alban Borja</small><br>
+    <small>${new Date().toLocaleString('es-EC')}</small>
+  </div>
+  <pre>${escHtml(contenido)}</pre>
+  <div class="footer">
+    <div>${escHtml(titulo)}</div>
+    <div>Registro: ${new Date().toISOString()}</div>
+  </div>
+  <script>
+    window.onload = function() {
+      window.print()
+      setTimeout(() => window.close(), 1000)
+    }
+  <\/script>
+</body>
+</html>`)
+  win.document.close()
+}
+
+function limpiarNota() {
+  const ta = document.getElementById('nota-contenido')
+  const ti = document.getElementById('nota-titulo')
+  if (ta) ta.value = ''
+  if (ti) ti.value = `Comprobante ${new Date().toLocaleString('es-EC')}`
+  window._notaContenidoOriginal = ''
+  mostrarDiff([], [])
+}
+
+// -------- Stats (solo admin) --------
 
 async function loadNotasStats() {
   try {
     const data = await api('/notas/stats/resumen')
     const el = document.getElementById('notas-stats-area')
     if (!el) return
+
+    const alertas = data.alertas_manipulacion || 0
     el.innerHTML = `
       <div class="grid-3">
         <div class="stat-card">
@@ -3117,11 +3444,13 @@ async function loadNotasStats() {
             <div class="stat-label">Este Mes</div>
           </div>
         </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="background:#d1fae5;color:#059669"><i class="fas fa-print"></i></div>
+        <div class="stat-card" ${alertas > 0 ? 'style="border:2px solid #f59e0b;background:#fffbeb"' : ''}>
+          <div class="stat-icon" style="background:${alertas>0?'#fef3c7':'#d1fae5'};color:${alertas>0?'#d97706':'#059669'}">
+            <i class="fas fa-${alertas>0?'exclamation-triangle':'check-circle'}"></i>
+          </div>
           <div class="stat-content">
-            <div class="stat-value">${(data.por_tipo || []).find(t => t.tipo === 'impresion')?.total || 0}</div>
-            <div class="stat-label">Impresiones</div>
+            <div class="stat-value" style="color:${alertas>0?'#d97706':'inherit'}">${alertas}</div>
+            <div class="stat-label">${alertas>0?'⚠️ Alertas de Manipulación':'Sin Alertas'}</div>
           </div>
         </div>
       </div>
@@ -3129,13 +3458,15 @@ async function loadNotasStats() {
   } catch {}
 }
 
-async function loadNotas() {
-  const tipo = document.getElementById('notas-tipo')?.value || ''
-  const fecha = document.getElementById('notas-fecha')?.value || ''
+// -------- Lista de notas guardadas --------
 
-  let path = '/notas?'
-  if (tipo) path += `tipo=${tipo}&`
-  if (fecha) path += `fecha=${fecha}&`
+async function loadNotas() {
+  const tipo  = document.getElementById('notas-tipo-f')?.value || ''
+  const fecha = document.getElementById('notas-fecha-f')?.value || ''
+
+  let path = '/notas?limit=100'
+  if (tipo)  path += `&tipo=${tipo}`
+  if (fecha) path += `&fecha=${fecha}`
 
   const list = document.getElementById('notas-list')
   if (!list) return
@@ -3146,48 +3477,97 @@ async function loadNotas() {
     const notas = data?.notas || []
 
     if (!notas.length) {
-      list.innerHTML = '<div class="empty-state"><i class="fas fa-receipt"></i><h3>Sin notas para este filtro</h3><p>Cambia los filtros o date para ver otras fechas</p></div>'
+      list.innerHTML = `<div class="empty-state">
+        <i class="fas fa-receipt"></i>
+        <h3>Sin comprobantes guardados</h3>
+        <p>Pega un comprobante arriba y guárdalo para que aparezca aquí.</p>
+      </div>`
       return
     }
 
-    list.innerHTML = notas.map(n => `
-      <div class="nota-card tipo-${n.tipo}">
-        <div class="nota-header">
-          <div class="nota-titulo">${escHtml(n.titulo)}</div>
-          ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteNota(${n.id})"><i class="fas fa-trash"></i></button>` : ''}
+    list.innerHTML = notas.map(n => {
+      const meta = n.metadata || {}
+      const tieneAlerta = meta.alerta_manipulacion === true
+      return `
+        <div class="nota-card tipo-${n.tipo}" style="${tieneAlerta ? 'border-left:4px solid #f59e0b;background:#fffbeb' : ''}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+            <div style="flex:1">
+              <div style="font-weight:700;color:#1e293b;font-size:1rem;margin-bottom:4px">
+                ${tieneAlerta ? '<span style="color:#d97706"><i class="fas fa-exclamation-triangle"></i></span> ' : ''}
+                ${escHtml(n.titulo)}
+              </div>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.8rem;color:#64748b;margin-bottom:8px">
+                <span class="nota-tipo-badge ${n.tipo}">${notaTipoIcon(n.tipo)} ${n.tipo}</span>
+                <span><i class="fas fa-user"></i> ${n.nombre} ${n.apellido}</span>
+                ${n.caja_id ? `<span><i class="fas fa-cash-register"></i> Caja #${n.caja_id}</span>` : ''}
+                <span><i class="fas fa-clock"></i> ${fmtDatetime(n.created_at)}</span>
+              </div>
+              ${tieneAlerta ? `
+                <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:6px 10px;font-size:0.8rem;color:#92400e;margin-bottom:8px">
+                  <i class="fas fa-exclamation-triangle"></i> <strong>Alerta:</strong> El trabajador modificó valores antes de guardar.
+                  ${meta.valores_alterados && meta.valores_alterados.length > 0 ?
+                    `Valores nuevos detectados: <strong>${meta.valores_alterados.map(v=>v.montos_nuevos?.join(', ')||'').join(', ')}</strong>` : ''}
+                </div>
+              ` : ''}
+              ${n.contenido ? `
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;
+                  font-family:monospace;font-size:0.82rem;color:#334155;white-space:pre-wrap;
+                  max-height:180px;overflow-y:auto;line-height:1.5">
+${escHtml(n.contenido.substring(0, 600))}${n.contenido.length > 600 ? '\n...(truncado)' : ''}</div>
+              ` : ''}
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:100px">
+              <button class="btn btn-ghost btn-sm" onclick="reimprimir(${n.id})"
+                title="Reimprimir">
+                <i class="fas fa-print"></i> Imprimir
+              </button>
+              ${isAdmin() ? `
+                <button class="btn btn-danger btn-sm" onclick="deleteNota(${n.id})">
+                  <i class="fas fa-trash"></i>
+                </button>
+              ` : ''}
+            </div>
+          </div>
+          ${meta.contenido_original && meta.contenido_original !== n.contenido ? `
+            <details style="margin-top:10px">
+              <summary style="cursor:pointer;font-size:0.8rem;color:#64748b;font-weight:600">
+                <i class="fas fa-eye"></i> Ver comprobante original (antes de editar)
+              </summary>
+              <div style="margin-top:8px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:10px;
+                font-family:monospace;font-size:0.82rem;color:#166534;white-space:pre-wrap;max-height:150px;overflow-y:auto">
+${escHtml(meta.contenido_original.substring(0, 500))}</div>
+            </details>
+          ` : ''}
         </div>
-        <div class="nota-meta">
-          <span class="nota-tipo-badge ${n.tipo}">${notaTipoIcon(n.tipo)} ${n.tipo}</span>
-          <span style="font-size:0.8rem;color:#94a3b8"><i class="fas fa-user"></i> ${n.nombre} ${n.apellido}</span>
-          ${n.caja_id ? `<span style="font-size:0.8rem;color:#94a3b8"><i class="fas fa-cash-register"></i> Caja #${n.caja_id}</span>` : ''}
-          <span style="font-size:0.8rem;color:#94a3b8">${fmtDatetime(n.created_at)}</span>
-        </div>
-        ${n.contenido ? `<div class="nota-contenido">${escHtml(n.contenido).substring(0, 400)}${n.contenido.length > 400 ? '...' : ''}</div>` : ''}
-      </div>
-    `).join('')
+      `
+    }).join('')
   } catch (err) {
     list.innerHTML = `<div class="alert alert-error">${err.message}</div>`
   }
 }
 
-function clearNotasFecha() {
-  const fechaEl = document.getElementById('notas-fecha')
-  if (fechaEl) fechaEl.value = new Date().toISOString().split('T')[0]
-  loadNotas()
+async function reimprimir(id) {
+  try {
+    const data = await api(`/notas/${id}`)
+    const n = data.nota
+    if (n) imprimirComprobante(n.titulo, n.contenido)
+  } catch (err) {
+    toast(err.message, 'error')
+  }
 }
 
 function notaTipoIcon(tipo) {
-  const icons = { impresion: '🖨️', comprobante: '📄', nota: '📝', recibo: '🧾', reporte: '📊' }
+  const icons = { impresion:'🖨️', comprobante:'📄', nota:'📝', recibo:'🧾', reporte:'📊' }
   return icons[tipo] || '📌'
 }
 
 async function deleteNota(id) {
-  if (!confirm('¿Eliminar esta nota?')) return
+  if (!confirm('¿Eliminar esta nota permanentemente?')) return
   try {
     await api(`/notas/${id}`, { method: 'DELETE' })
     toast('Nota eliminada', 'success')
     loadNotas()
-    loadNotasStats()
+    if (isAdmin()) loadNotasStats()
   } catch (err) {
     toast(err.message, 'error')
   }
@@ -3195,7 +3575,11 @@ async function deleteNota(id) {
 
 function escHtml(str) {
   if (!str) return ''
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
 }
 
 // ============================================================
@@ -3203,14 +3587,11 @@ function escHtml(str) {
 // ============================================================
 async function renderHistorial() {
   const content = document.getElementById('page-content')
-
-  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
   const hoy = new Date()
   const mesActual = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`
 
   content.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:20px">
-      <!-- Tabs -->
       <div style="display:flex;gap:10px">
         <button class="btn btn-primary btn-sm" id="hist-tab-diario" onclick="showHistTab('diario')">
           <i class="fas fa-calendar-day"></i> Historial Diario
@@ -3220,48 +3601,49 @@ async function renderHistorial() {
         </button>
       </div>
 
-      <!-- Filtros Diario -->
       <div id="hist-filtros-diario" class="card">
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-          <label style="font-weight:600;color:#1e293b">Mes:</label>
-          <input type="month" class="form-input" style="width:180px" id="hist-mes" value="${mesActual}" onchange="loadHistorialDiario()">
+          <label style="font-weight:600">Mes:</label>
+          <input type="month" class="form-input" style="width:180px" id="hist-mes"
+            value="${mesActual}" onchange="loadHistorialDiario()">
           ${isAdmin() ? `
-          <label style="font-weight:600;color:#1e293b">Usuario:</label>
-          <select class="form-select" style="width:200px" id="hist-user" onchange="loadHistorialDiario()">
-            <option value="">Todos</option>
-          </select>` : ''}
-          <button class="btn btn-ghost btn-sm" onclick="loadHistorialDiario()"><i class="fas fa-sync"></i></button>
+            <label style="font-weight:600">Usuario:</label>
+            <select class="form-select" style="width:200px" id="hist-user" onchange="loadHistorialDiario()">
+              <option value="">Todos</option>
+            </select>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="loadHistorialDiario()">
+            <i class="fas fa-sync"></i>
+          </button>
         </div>
       </div>
 
-      <!-- Filtros Mensual -->
       <div id="hist-filtros-mensual" class="card" style="display:none">
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-          <label style="font-weight:600;color:#1e293b">Año:</label>
-          <input type="number" class="form-input" style="width:120px" id="hist-anio" value="${hoy.getFullYear()}" min="2020" max="2030" onchange="loadHistorialMensual()">
+          <label style="font-weight:600">Año:</label>
+          <input type="number" class="form-input" style="width:120px" id="hist-anio"
+            value="${hoy.getFullYear()}" min="2020" max="2030" onchange="loadHistorialMensual()">
           ${isAdmin() ? `
-          <label style="font-weight:600;color:#1e293b">Usuario:</label>
-          <select class="form-select" style="width:200px" id="hist-user-mes" onchange="loadHistorialMensual()">
-            <option value="">Todos</option>
-          </select>` : ''}
+            <label style="font-weight:600">Usuario:</label>
+            <select class="form-select" style="width:200px" id="hist-user-mes" onchange="loadHistorialMensual()">
+              <option value="">Todos</option>
+            </select>` : ''}
         </div>
       </div>
 
-      <!-- Contenido -->
       <div id="hist-content">
-        <div style="text-align:center;padding:40px"><div class="spinner-dark" style="width:36px;height:36px;border-width:4px;display:inline-block"></div></div>
+        <div style="text-align:center;padding:40px">
+          <div class="spinner-dark" style="width:36px;height:36px;border-width:4px;display:inline-block"></div>
+        </div>
       </div>
     </div>
   `
 
-  // Cargar usuarios si es admin
   if (isAdmin()) {
     try {
       const usersData = await api('/users')
       const users = usersData?.users || []
-      const selects = ['hist-user', 'hist-user-mes']
-      selects.forEach(selId => {
-        const sel = document.getElementById(selId)
+      ;['hist-user','hist-user-mes'].forEach(id => {
+        const sel = document.getElementById(id)
         if (sel) {
           sel.innerHTML = '<option value="">Todos</option>' +
             users.map(u => `<option value="${u.id}">${u.nombre} ${u.apellido}</option>`).join('')
@@ -3277,22 +3659,22 @@ window._histTab = 'diario'
 
 function showHistTab(tab) {
   window._histTab = tab
-  const diarioBtns = document.getElementById('hist-tab-diario')
-  const mensualBtns = document.getElementById('hist-tab-mensual')
-  const filtrosDiario = document.getElementById('hist-filtros-diario')
-  const filtrosMensual = document.getElementById('hist-filtros-mensual')
+  const dBtn = document.getElementById('hist-tab-diario')
+  const mBtn = document.getElementById('hist-tab-mensual')
+  const dFil = document.getElementById('hist-filtros-diario')
+  const mFil = document.getElementById('hist-filtros-mensual')
 
   if (tab === 'diario') {
-    diarioBtns?.classList.add('btn-primary'); diarioBtns?.classList.remove('btn-ghost')
-    mensualBtns?.classList.add('btn-ghost'); mensualBtns?.classList.remove('btn-primary')
-    if (filtrosDiario) filtrosDiario.style.display = ''
-    if (filtrosMensual) filtrosMensual.style.display = 'none'
+    dBtn?.classList.replace('btn-ghost','btn-primary')
+    mBtn?.classList.replace('btn-primary','btn-ghost')
+    if (dFil) dFil.style.display = ''
+    if (mFil) mFil.style.display = 'none'
     loadHistorialDiario()
   } else {
-    mensualBtns?.classList.add('btn-primary'); mensualBtns?.classList.remove('btn-ghost')
-    diarioBtns?.classList.add('btn-ghost'); diarioBtns?.classList.remove('btn-primary')
-    if (filtrosMensual) filtrosMensual.style.display = ''
-    if (filtrosDiario) filtrosDiario.style.display = 'none'
+    mBtn?.classList.replace('btn-ghost','btn-primary')
+    dBtn?.classList.replace('btn-primary','btn-ghost')
+    if (mFil) mFil.style.display = ''
+    if (dFil) dFil.style.display = 'none'
     loadHistorialMensual()
   }
 }
@@ -3302,11 +3684,11 @@ async function loadHistorialDiario() {
   if (!content) return
   content.innerHTML = '<div style="text-align:center;padding:30px"><div class="spinner-dark" style="width:30px;height:30px;border-width:3px;display:inline-block"></div></div>'
 
-  const mes = document.getElementById('hist-mes')?.value || ''
+  const mes    = document.getElementById('hist-mes')?.value || ''
   const userId = document.getElementById('hist-user')?.value || ''
 
-  let path = `/historial?limit=60`
-  if (mes) path += `&mes=${mes}`
+  let path = '/historial?limit=60'
+  if (mes)    path += `&mes=${mes}`
   if (userId) path += `&user_id=${userId}`
 
   try {
@@ -3314,17 +3696,27 @@ async function loadHistorialDiario() {
     const historial = data?.historial || []
 
     if (!historial.length) {
-      content.innerHTML = '<div class="empty-state"><i class="fas fa-calendar-times"></i><h3>Sin historial para este período</h3><p>Los snapshots se crean cuando se aprueba un cuadre de caja.</p></div>'
+      content.innerHTML = `<div class="empty-state">
+        <i class="fas fa-calendar-times"></i>
+        <h3>Sin historial para este período</h3>
+        <p>Los registros se crean automáticamente cuando se aprueba un cuadre de caja.</p>
+      </div>`
       return
     }
 
     content.innerHTML = historial.map(h => {
-      const sData = h.snapshot_data
+      const saldoFinal = h.saldo_final || (h.saldo_inicial + h.total_ingresos - h.total_egresos)
+      const diferencia = saldoFinal - (h.saldo_inicial || 0)
+      const alertaSaldo = diferencia > 5
       return `
-        <div class="historial-card">
+        <div class="historial-card" ${alertaSaldo ? 'style="border-left:4px solid #10b981;background:#f0fdf4"' : ''}>
           <div class="historial-fecha">
             <i class="fas fa-calendar-day"></i>
             ${fmtDate(h.fecha)} — <strong>${h.nombre} ${h.apellido}</strong>
+            ${alertaSaldo ? `<span style="margin-left:12px;background:#10b981;color:white;
+              padding:2px 10px;border-radius:20px;font-size:0.78rem;font-weight:700">
+              <i class="fas fa-arrow-up"></i> +${fmt$(diferencia)} vs inicio
+            </span>` : ''}
           </div>
           <div class="historial-stats">
             <div class="historial-stat">
@@ -3343,11 +3735,17 @@ async function loadHistorialDiario() {
               <div class="historial-stat-val ${h.ganancia_neta >= 0 ? 'positive' : 'negative'}">${fmt$(h.ganancia_neta)}</div>
               <div class="historial-stat-label">Ganancia Neta</div>
             </div>
+            <div class="historial-stat">
+              <div class="historial-stat-val ${alertaSaldo ? 'positive' : ''}">${fmt$(saldoFinal)}</div>
+              <div class="historial-stat-label">Saldo Final</div>
+            </div>
           </div>
           <div style="display:flex;gap:12px;margin-top:10px;font-size:0.8rem;color:#94a3b8;flex-wrap:wrap">
             <span><i class="fas fa-exchange-alt"></i> ${h.num_movimientos || 0} movimientos</span>
-            <span><i class="fas fa-file-invoice-dollar"></i> ${h.num_pendientes_cobrados || 0} cobros</span>
-            ${Math.abs(h.diferencia_caja) > 0.01 ? `<span style="color:${h.diferencia_caja > 0 ? '#10b981' : '#ef4444'}"><i class="fas fa-balance-scale"></i> Diferencia: ${fmt$(h.diferencia_caja)}</span>` : '<span style="color:#10b981"><i class="fas fa-check-circle"></i> Cuadre perfecto</span>'}
+            <span><i class="fas fa-file-plus"></i> ${h.num_pendientes_nuevos || 0} pendientes nuevos</span>
+            <span style="color:${h.estado_caja === 'aprobada' ? '#10b981' : '#f59e0b'}">
+              <i class="fas fa-circle"></i> ${h.estado_caja || 'aprobada'}
+            </span>
           </div>
         </div>
       `
@@ -3362,7 +3760,7 @@ async function loadHistorialMensual() {
   if (!content) return
   content.innerHTML = '<div style="text-align:center;padding:30px"><div class="spinner-dark" style="width:30px;height:30px;border-width:3px;display:inline-block"></div></div>'
 
-  const anio = document.getElementById('hist-anio')?.value || new Date().getFullYear()
+  const anio   = document.getElementById('hist-anio')?.value || new Date().getFullYear()
   const userId = document.getElementById('hist-user-mes')?.value || ''
 
   let path = `/historial/mensual?anio=${anio}`
@@ -3377,17 +3775,19 @@ async function loadHistorialMensual() {
       return
     }
 
-    const mesNombres = { '01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre' }
+    const mesNombres = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio',
+      '07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'}
 
     content.innerHTML = meses.map(m => {
-      const mesNum = (m.mes || '').split('-')[1] || ''
-      const mesNombre = mesNombres[mesNum] || m.mes
+      const mesNum = (m.mes||'').split('-')[1]||''
       return `
         <div class="mes-card">
           <div class="mes-title">
             <i class="fas fa-calendar-alt" style="color:var(--accent)"></i>
-            ${mesNombre} ${anio} — ${m.nombre} ${m.apellido}
-            <span style="font-size:0.8rem;font-weight:normal;color:#64748b;margin-left:8px">(${m.dias_trabajados} días)</span>
+            ${mesNombres[mesNum]||m.mes} ${anio} — ${m.nombre} ${m.apellido}
+            <span style="font-size:0.8rem;font-weight:normal;color:#64748b;margin-left:8px">
+              (${m.dias_trabajados} días)
+            </span>
           </div>
           <div class="mes-grid">
             <div class="mes-stat">
@@ -3399,16 +3799,16 @@ async function loadHistorialMensual() {
               <div class="mes-stat-label">Total Egresos</div>
             </div>
             <div class="mes-stat">
-              <div class="mes-stat-val" style="color:${m.ganancia_neta >= 0 ? '#10b981' : '#ef4444'}">${fmt$(m.ganancia_neta)}</div>
+              <div class="mes-stat-val" style="color:${m.ganancia_neta>=0?'#10b981':'#ef4444'}">${fmt$(m.ganancia_neta)}</div>
               <div class="mes-stat-label">Ganancia Neta</div>
             </div>
             <div class="mes-stat">
-              <div class="mes-stat-val">${m.total_movimientos || 0}</div>
+              <div class="mes-stat-val">${m.total_movimientos||0}</div>
               <div class="mes-stat-label">Movimientos</div>
             </div>
             <div class="mes-stat">
-              <div class="mes-stat-val">${m.pendientes_cobrados || 0}</div>
-              <div class="mes-stat-label">Cobros Realizados</div>
+              <div class="mes-stat-val">${m.pendientes_nuevos||0}</div>
+              <div class="mes-stat-label">Pendientes Nuevos</div>
             </div>
             <div class="mes-stat">
               <div class="mes-stat-val">${m.dias_trabajados}</div>
@@ -3424,10 +3824,9 @@ async function loadHistorialMensual() {
 }
 
 // ============================================================
-// CAPTURA DE IMPRESIÓN (Ctrl+P / Archivo > Imprimir)
+// CAPTURA AUTOMÁTICA DE IMPRESIÓN (Ctrl+P)
 // ============================================================
-(function setupPrintCapture() {
-  // Indicador visual en el DOM
+;(function setupPrintCapture() {
   const indicator = document.createElement('div')
   indicator.id = 'print-capture-indicator'
   indicator.className = 'print-capture-indicator'
@@ -3436,46 +3835,24 @@ async function loadHistorialMensual() {
 
   async function capturarImpresion() {
     if (!token || !currentUser) return
-
-    const indicator = document.getElementById('print-capture-indicator')
-    if (indicator) indicator.classList.add('show')
-
+    const ind = document.getElementById('print-capture-indicator')
+    if (ind) ind.classList.add('show')
     try {
-      const paginaActual = currentPage || 'pagina-desconocida'
+      const paginaActual = currentPage || 'pagina'
       const titulo = `Impresión — ${paginaActual} — ${new Date().toLocaleString('es-EC')}`
-
-      // Capturar el contenido visible (texto plano del área principal)
       const contentEl = document.getElementById('page-content')
-      const contenidoTexto = contentEl ? contentEl.innerText.substring(0, 2000) : ''
-
+      const contenido = contentEl ? contentEl.innerText.substring(0, 2000) : ''
       await fetch('/api/notas/captura-impresion', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          titulo,
-          contenido_html: contenidoTexto,
-          pagina_actual: paginaActual
-        })
+        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${token}` },
+        body: JSON.stringify({ titulo, contenido_html: contenido, pagina_actual: paginaActual })
       })
-    } catch (e) {
-      // Silencioso — no interrumpir el flujo de impresión
-    }
-
-    setTimeout(() => {
-      if (indicator) indicator.classList.remove('show')
-    }, 3000)
+    } catch {}
+    setTimeout(() => { const ind2 = document.getElementById('print-capture-indicator'); if(ind2) ind2.classList.remove('show') }, 3000)
   }
 
-  // Escuchar evento beforeprint (Ctrl+P, Archivo > Imprimir)
   window.addEventListener('beforeprint', capturarImpresion)
-
-  // Fallback para navegadores que no disparan beforeprint
-  window.matchMedia('print').addEventListener('change', (mq) => {
-    if (mq.matches) capturarImpresion()
-  })
+  window.matchMedia('print').addEventListener('change', mq => { if (mq.matches) capturarImpresion() })
 })()
 
 // ============================================================
