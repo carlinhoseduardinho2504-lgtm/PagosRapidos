@@ -1,0 +1,26 @@
+{
+  "name": "Pagos Rapidos - Agencia Alban Borja",
+  "short_name": "Pagos Rapidos",
+  "description": "Sistema de Gestión de Caja y Pendientes",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a3a8c",
+  "theme_color": "#1a3a8c",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "business"],
+  "lang": "es"
+}
